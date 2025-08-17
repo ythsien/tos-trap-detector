@@ -3,8 +3,33 @@
 
 export class AIService {
   constructor() {
-    this.apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+    this.apiKey = this.getApiKey();
     this.baseURL = 'https://api.openai.com/v1/chat/completions';
+  }
+
+  /**
+   * Get API key from environment variable or localStorage
+   * @returns {string} API key
+   */
+  getApiKey() {
+    // First try environment variable
+    let apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+    
+    // If not set or is placeholder, try localStorage
+    if (!apiKey || apiKey === 'your_openai_api_key_here') {
+      apiKey = localStorage.getItem('openai_api_key');
+    }
+    
+    return apiKey;
+  }
+
+  /**
+   * Update API key (for when user sets it via UI)
+   * @param {string} apiKey - New API key
+   */
+  updateApiKey(apiKey) {
+    this.apiKey = apiKey;
+    console.log('API key updated:', !!apiKey);
   }
 
   /**
@@ -12,7 +37,8 @@ export class AIService {
    * @returns {boolean} True if API key is available
    */
   isConfigured() {
-    return this.apiKey && this.apiKey !== 'your_openai_api_key_here' && this.apiKey.trim() !== '';
+    const apiKey = this.getApiKey();
+    return apiKey && apiKey !== 'your_openai_api_key_here' && apiKey.trim() !== '';
   }
 
   /**
@@ -113,6 +139,9 @@ ${contractText}`;
    * @returns {Promise<Object>} AI response
    */
   async callAI(prompt) {
+    // Refresh API key before making the call
+    this.apiKey = this.getApiKey();
+    
     if (!this.isConfigured()) {
       console.log('Using simulated response (no API key configured)');
       return this.getSimulatedResponse(prompt);

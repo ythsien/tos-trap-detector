@@ -17,8 +17,12 @@ export const ApiKeyConfig = ({ onApiKeySet }) => {
       // Update environment variable for current session
       import.meta.env.VITE_OPENAI_API_KEY = apiKey;
       
+      // Notify parent component
       onApiKeySet(apiKey);
       setIsVisible(false);
+      
+      // Clear the input
+      setApiKey('');
     } catch (error) {
       console.error('Failed to set API key:', error);
     } finally {

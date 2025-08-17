@@ -150,6 +150,12 @@ function App() {
   const handleApiKeySet = (apiKey) => {
     setApiKeyConfigured(!!apiKey);
     console.log('API key configured:', !!apiKey);
+    
+    // Force a refresh of the analysis service
+    if (apiKey) {
+      // Clear any existing results to force a fresh analysis
+      setAnalysisResult(null);
+    }
   };
 
   const renderAnalysisResults = () => {

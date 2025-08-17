@@ -8,12 +8,23 @@ export class AIService {
   }
 
   /**
+   * Check if API key is configured
+   * @returns {boolean} True if API key is available
+   */
+  isConfigured() {
+    return this.apiKey && this.apiKey !== 'your_openai_api_key_here' && this.apiKey.trim() !== '';
+  }
+
+  /**
    * Analyze contract text using AI to detect harmful clauses
    * @param {string} contractText - The contract text to analyze
    * @returns {Promise<Object>} Structured analysis results
    */
   async analyzeContract(contractText) {
     try {
+      console.log('Starting AI analysis...');
+      console.log('API Key configured:', this.isConfigured());
+      
       const prompt = this.createAnalysisPrompt(contractText);
       const response = await this.callAI(prompt);
       return this.parseAIResponse(response);
@@ -102,40 +113,59 @@ ${contractText}`;
    * @returns {Promise<Object>} AI response
    */
   async callAI(prompt) {
-    if (!this.apiKey) {
-      // Fallback to simulated response for development
+    if (!this.isConfigured()) {
+      console.log('Using simulated response (no API key configured)');
       return this.getSimulatedResponse(prompt);
     }
 
-    const response = await fetch(this.baseURL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a legal analysis expert specializing in consumer protection. Provide responses in valid JSON format only.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.3,
-        max_tokens: 3000
-      })
-    });
+    console.log('Calling OpenAI API...');
+    
+    try {
+      const response = await fetch(this.baseURL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a legal analysis expert specializing in consumer protection. Provide responses in valid JSON format only.'
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 3000
+        })
+      });
 
-    if (!response.ok) {
-      throw new Error(`AI API error: ${response.status}`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('OpenAI API error:', response.status, errorData);
+        
+        if (response.status === 401) {
+          throw new Error('Invalid API key. Please check your OpenAI API key.');
+        } else if (response.status === 429) {
+          throw new Error('Rate limit exceeded. Please try again later.');
+        } else if (response.status === 400) {
+          throw new Error('Invalid request. Please check your input.');
+        } else {
+          throw new Error(`API error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+        }
+      }
+
+      const data = await response.json();
+      console.log('OpenAI API response received');
+      return data.choices[0].message.content;
+    } catch (error) {
+      console.error('API call failed:', error);
+      throw error;
     }
-
-    const data = await response.json();
-    return data.choices[0].message.content;
   }
 
   /**
@@ -145,17 +175,28 @@ ${contractText}`;
    */
   parseAIResponse(aiResponse) {
     try {
+      console.log('Parsing AI response...');
       // Try to parse as JSON
       const parsed = JSON.parse(aiResponse);
+      
+      // Validate the response structure
+      if (!parsed.clauses || !Array.isArray(parsed.clauses)) {
+        console.warn('Invalid response structure, using fallback parsing');
+        return this.parseTextResponse(aiResponse);
+      }
+
+      console.log('Successfully parsed AI response');
       return {
         success: true,
         clauses: parsed.clauses || [],
         overallRisk: parsed.overallRisk || 'Low',
-        totalClauses: parsed.totalClauses || 0,
+        totalClauses: parsed.totalClauses || parsed.clauses.length || 0,
         summary: parsed.summary || 'Analysis completed',
-        rawResponse: aiResponse
+        rawResponse: aiResponse,
+        isRealAI: this.isConfigured()
       };
     } catch (error) {
+      console.warn('JSON parsing failed, using text parsing:', error);
       // If JSON parsing fails, try to extract information from text
       return this.parseTextResponse(aiResponse);
     }
@@ -167,14 +208,16 @@ ${contractText}`;
    * @returns {Object} Structured results
    */
   parseTextResponse(textResponse) {
+    console.log('Using text parsing fallback');
     // Fallback parsing logic for text responses
     const results = {
       success: true,
       clauses: [],
       overallRisk: 'Low',
       totalClauses: 0,
-      summary: 'Analysis completed',
-      rawResponse: textResponse
+      summary: 'Analysis completed (text parsing)',
+      rawResponse: textResponse,
+      isRealAI: this.isConfigured()
     };
 
     // Basic text parsing logic (can be enhanced)
@@ -199,6 +242,7 @@ ${contractText}`;
    * @returns {Promise<string>} Simulated AI response
    */
   async getSimulatedResponse(prompt) {
+    console.log('Generating simulated response...');
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 2000));
 

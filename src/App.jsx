@@ -10,6 +10,7 @@ import {
 } from "firebase/auth";
 import { AnalysisService } from "./services/analysisService.js";
 import { ERROR_MESSAGES, SUCCESS_MESSAGES, UI_MESSAGES } from "./utils/constants.js";
+import { ApiKeyConfig } from "./components/ApiKeyConfig.jsx";
 
 function App() {
   const [isLogin, setIsLogin] = useState(true);
@@ -21,11 +22,18 @@ function App() {
   const [contractURL, setContractURL] = useState("");
   const [analysisResult, setAnalysisResult] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
     });
+
+    // Check if API key is configured
+    const storedApiKey = localStorage.getItem('openai_api_key');
+    if (storedApiKey && storedApiKey !== 'your_openai_api_key_here') {
+      setApiKeyConfigured(true);
+    }
 
     // Cleanup subscription on unmount
     return () => unsubscribe();
@@ -139,6 +147,11 @@ function App() {
     }
   };
 
+  const handleApiKeySet = (apiKey) => {
+    setApiKeyConfigured(!!apiKey);
+    console.log('API key configured:', !!apiKey);
+  };
+
   const renderAnalysisResults = () => {
     if (!analysisResult) return null;
 
@@ -148,7 +161,18 @@ function App() {
     return (
       <div className="mt-6 space-y-4">
         <div className="bg-white p-6 rounded-lg shadow-md">
-          <h3 className="text-xl font-semibold mb-4 text-gray-800">Analysis Results</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-semibold text-gray-800">Analysis Results</h3>
+            {analysis.isRealAI ? (
+              <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">
+                🤖 Real AI
+              </span>
+            ) : (
+              <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
+                🎭 Simulated
+              </span>
+            )}
+          </div>
           
           {/* Overall Summary */}
           <div className={`mb-6 p-4 rounded-lg border ${AnalysisService.getRiskColor(overallRisk)}`}>
@@ -227,6 +251,9 @@ function App() {
               </button>
             </div>
           </div>
+
+          {/* API Key Configuration */}
+          <ApiKeyConfig onApiKeySet={handleApiKeySet} />
 
           {/* Analysis Form */}
           <div className="bg-white p-6 rounded-2xl shadow-md mb-6">

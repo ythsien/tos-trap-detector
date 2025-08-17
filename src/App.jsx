@@ -8,6 +8,8 @@ import {
   GoogleAuthProvider,
   signInWithPopup
 } from "firebase/auth";
+import { AnalysisService } from "./services/analysisService.js";
+import { ERROR_MESSAGES, SUCCESS_MESSAGES, UI_MESSAGES } from "./utils/constants.js";
 
 function App() {
   const [isLogin, setIsLogin] = useState(true);
@@ -15,9 +17,10 @@ function App() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [user, setUser] = useState(null);
-  const [tosText, setTosText] = useState("");
-  const [tosURL, setTosURL] = useState("");
-  const [result, setResult] = useState("");
+  const [contractText, setContractText] = useState("");
+  const [contractURL, setContractURL] = useState("");
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -78,6 +81,7 @@ function App() {
     try {
       await signOut(auth);
       console.log("Logged out successfully!");
+      setAnalysisResult(null); // Clear analysis results on logout
     } catch (error) {
       console.error("Logout error:", error);
       setError(error.message);
@@ -104,70 +108,184 @@ function App() {
     }
   };
 
-  const handleScan = async () => {
-    const input = tosText || tosURL;
+  const handleAnalyze = async () => {
+    const input = contractText || contractURL;
     if (!input) {
-      setError("Please enter TOS text or a link.");
+      setError(ERROR_MESSAGES.NO_TEXT_PROVIDED);
       return;
     }
-    setResult("🔍 Scanning...");
-    // TODO: Add AI scanning function here (e.g. call to OpenAI or your Cloud Function)
-    setTimeout(() => {
-      setResult("✅ (Simulated result) No auto-renewal traps found.");
-    }, 1500);
+
+    setIsAnalyzing(true);
+    setError("");
+    setAnalysisResult(null);
+
+    try {
+      let result;
+      if (contractText) {
+        // Analyze text input
+        result = await AnalysisService.analyzeContract(contractText);
+      } else {
+        // Analyze URL input
+        result = await AnalysisService.analyzeContractFromURL(contractURL);
+      }
+
+      console.log("Analysis result:", result);
+      setAnalysisResult(result);
+    } catch (error) {
+      console.error("Analysis error:", error);
+      setError(ERROR_MESSAGES.ANALYSIS_FAILED + ": " + error.message);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const renderAnalysisResults = () => {
+    if (!analysisResult) return null;
+
+    const { analysis, summary } = analysisResult;
+    const { clauses, overallRisk } = analysis;
+
+    return (
+      <div className="mt-6 space-y-4">
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h3 className="text-xl font-semibold mb-4 text-gray-800">Analysis Results</h3>
+          
+          {/* Overall Summary */}
+          <div className={`mb-6 p-4 rounded-lg border ${AnalysisService.getRiskColor(overallRisk)}`}>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-2xl">{AnalysisService.getRiskIcon(overallRisk)}</span>
+              <h4 className="font-semibold">Overall Risk: {overallRisk}</h4>
+            </div>
+            <p className="text-sm">
+              Found {summary.totalClauses} clause{summary.totalClauses !== 1 ? 's' : ''} 
+              ({summary.highRiskClauses} high risk, {summary.mediumRiskClauses} medium risk, {summary.lowRiskClauses} low risk)
+            </p>
+          </div>
+
+          {/* Individual Clauses */}
+          {clauses.length > 0 ? (
+            <div className="space-y-4">
+              <h4 className="font-semibold text-gray-700">Detected Clauses:</h4>
+              {clauses.map((clause, index) => (
+                <div key={index} className={`p-4 rounded-lg border ${AnalysisService.getRiskColor(clause.risk)}`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xl">{clause.emoji}</span>
+                    <span className="text-lg">{AnalysisService.getCategoryIcon(clause.category)}</span>
+                    <h5 className="font-semibold">{clause.category}</h5>
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${AnalysisService.getRiskColor(clause.risk)}`}>
+                      {clause.risk} Risk
+                    </span>
+                  </div>
+                  
+                  <div className="space-y-2 text-sm">
+                    <div>
+                      <strong>Summary:</strong> {clause.summary}
+                    </div>
+                    <div>
+                      <strong>Why it matters:</strong> {clause.whyItMatters}
+                    </div>
+                    <div>
+                      <strong>Contract snippet:</strong>
+                      <blockquote className="mt-1 p-2 bg-gray-50 rounded italic">
+                        "{clause.snippet}"
+                      </blockquote>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <div className="text-6xl mb-4">✅</div>
+              <h4 className="text-lg font-semibold text-green-600 mb-2">No Risky Clauses Detected</h4>
+              <p className="text-gray-600">This contract appears to be free of the common harmful clauses we check for.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   if (user) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center px-4 py-8">
-        <div className="max-w-md w-full bg-white p-8 rounded-2xl shadow-md mb-8">
-          <h1 className="text-2xl font-bold text-center text-blue-600 mb-6">
-            Welcome, {user.email}
-          </h1>
-          <button
-            onClick={handleLogout}
-            className="w-full bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 transition"
-          >
-            Log Out
-          </button>
-        </div>
-
-        <div className="max-w-md w-full bg-white p-8 rounded-2xl shadow-md">
-          <h3 className="text-xl font-semibold mb-4 text-gray-700">Check Terms of Service</h3>
-          
-          <div className="space-y-4">
-            <textarea
-              rows="6"
-              placeholder="Paste terms of service or contract text here..."
-              value={tosText}
-              onChange={(e) => setTosText(e.target.value)}
-              className="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            ></textarea>
-
-            <p className="text-center text-gray-500">— OR —</p>
-
-            <input
-              type="url"
-              placeholder="Paste a link to a TOS page"
-              value={tosURL}
-              onChange={(e) => setTosURL(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-
-            <button
-              onClick={handleScan}
-              className="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition"
-            >
-              Scan Terms
-            </button>
-
-            {result && (
-              <div className="mt-4 p-4 bg-gray-100 rounded-lg text-gray-800">
-                <strong>Result:</strong>
-                <p className="mt-2 whitespace-pre-wrap">{result}</p>
+        <div className="max-w-4xl w-full">
+          {/* Header */}
+          <div className="bg-white p-6 rounded-2xl shadow-md mb-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h1 className="text-2xl font-bold text-blue-600 mb-2">
+                  Contract Risk Analyzer
+                </h1>
+                <p className="text-gray-600">Welcome, {user.email}</p>
               </div>
-            )}
+              <button
+                onClick={handleLogout}
+                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition"
+              >
+                Log Out
+              </button>
+            </div>
           </div>
+
+          {/* Analysis Form */}
+          <div className="bg-white p-6 rounded-2xl shadow-md mb-6">
+            <h3 className="text-xl font-semibold mb-4 text-gray-700">Analyze Contract</h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Contract Text
+                </label>
+                <textarea
+                  rows="6"
+                  placeholder="Paste contract text, terms of service, or agreement here..."
+                  value={contractText}
+                  onChange={(e) => setContractText(e.target.value)}
+                  className="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="text-center text-gray-500">— OR —</div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Contract URL
+                </label>
+                <input
+                  type="url"
+                  placeholder="Paste a link to a contract or terms page"
+                  value={contractURL}
+                  onChange={(e) => setContractURL(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <button
+                onClick={handleAnalyze}
+                disabled={isAnalyzing}
+                className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isAnalyzing ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="animate-spin">🔍</span>
+                    {UI_MESSAGES.ANALYZING}
+                  </span>
+                ) : (
+                  "Analyze Contract"
+                )}
+              </button>
+
+              {error && (
+                <div className="p-3 bg-red-100 text-red-700 rounded-lg text-sm">
+                  {error}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Analysis Results */}
+          {renderAnalysisResults()}
         </div>
       </div>
     );

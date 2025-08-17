@@ -35,12 +35,42 @@ function App() {
 
   const handleGoogleSignIn = async () => {
     try {
+      console.log("Starting Google sign in...");
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-      console.log("Google sign in successful!");
+      console.log("Provider created:", provider);
+      
+      // Add custom parameters if needed
+      provider.setCustomParameters({
+        prompt: 'select_account'
+      });
+      
+      const result = await signInWithPopup(auth, provider);
+      console.log("Google sign in successful!", result);
     } catch (error) {
-      console.error("Google sign in error:", error);
-      setError(error.message);
+      console.error("Google sign in error details:", {
+        code: error.code,
+        message: error.message,
+        email: error.email,
+        credential: error.credential
+      });
+      
+      // Provide more specific error messages
+      let errorMessage = "Google sign-in failed. ";
+      switch (error.code) {
+        case 'auth/popup-blocked':
+          errorMessage += "Please allow popups for this site.";
+          break;
+        case 'auth/popup-closed-by-user':
+          errorMessage += "Sign-in was cancelled.";
+          break;
+        case 'auth/unauthorized-domain':
+          errorMessage += "This domain is not authorized for sign-in.";
+          break;
+        default:
+          errorMessage += error.message;
+      }
+      
+      setError(errorMessage);
     }
   };
 

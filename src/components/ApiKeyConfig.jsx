@@ -1,17 +1,35 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 export const ApiKeyConfig = ({ onApiKeySet }) => {
   const [apiKey, setApiKey] = useState('');
   const [isVisible, setIsVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLocked, setIsLocked] = useState(true);
+
+  // Prefill with anonymized stored key if available
+  useEffect(() => {
+    const stored = localStorage.getItem('openai_api_key');
+    if (stored && stored.length > 8) {
+      const masked = `${stored.slice(0, 3)}****************${stored.slice(-4)}`;
+      setApiKey(masked);
+      setIsLocked(true);
+    } else if (stored) {
+      setApiKey('********');
+      setIsLocked(true);
+    }
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     
     try {
+      // If field is locked, clicking primary button acts as Test Connection
+      if (isLocked) {
+        await handleTestConnection();
+        return;
+      }
       // Store the API key in localStorage (for demo purposes)
-      // In production, you'd want to handle this more securely
       localStorage.setItem('openai_api_key', apiKey);
       
       // Update environment variable for current session
@@ -22,7 +40,9 @@ export const ApiKeyConfig = ({ onApiKeySet }) => {
       setIsVisible(false);
       
       // Clear the input
-      setApiKey('');
+      const masked = `${apiKey.slice(0, 3)}****************${apiKey.slice(-4)}`;
+      setApiKey(masked);
+      setIsLocked(true);
     } catch (error) {
       console.error('Failed to set API key:', error);
     } finally {
@@ -31,13 +51,15 @@ export const ApiKeyConfig = ({ onApiKeySet }) => {
   };
 
   const handleTestConnection = async () => {
-    if (!apiKey) return;
+    const stored = localStorage.getItem('openai_api_key');
+    const keyToTest = isLocked ? stored : apiKey;
+    if (!keyToTest) return;
     
     setIsLoading(true);
     try {
       const response = await fetch('https://api.openai.com/v1/models', {
         headers: {
-          'Authorization': `Bearer ${apiKey}`
+          'Authorization': `Bearer ${keyToTest}`
         }
       });
       
@@ -72,30 +94,30 @@ export const ApiKeyConfig = ({ onApiKeySet }) => {
               OpenAI API Key
             </label>
             <input
-              type="password"
+              type={isLocked ? 'text' : 'password'}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="sk-..."
-              className="w-full px-3 py-2 border border-blue-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={isLocked}
+              className="w-full px-3 py-2 border border-blue-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
             />
           </div>
           
           <div className="flex gap-2">
             <button
               type="submit"
-              disabled={!apiKey || isLoading}
+              disabled={isLoading}
               className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50"
             >
-              {isLoading ? 'Setting...' : 'Set API Key'}
+              {isLocked ? (isLoading ? 'Testing...' : 'Test Connection') : (isLoading ? 'Setting...' : 'Set API Key')}
             </button>
             
             <button
               type="button"
-              onClick={handleTestConnection}
-              disabled={!apiKey || isLoading}
-              className="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 disabled:opacity-50"
+              onClick={() => setIsLocked(!isLocked)}
+              className="px-3 py-1 bg-gray-200 text-gray-800 text-xs rounded hover:bg-gray-300"
             >
-              Test Connection
+              {isLocked ? 'Edit' : 'Cancel'}
             </button>
           </div>
           

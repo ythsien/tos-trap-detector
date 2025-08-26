@@ -2,310 +2,283 @@
 // Handles communication with AI providers for comprehensive clause detection
 
 export class AIService {
-  constructor() {
-    this.apiKey = this.getApiKey();
-    this.baseURL = 'https://api.openai.com/v1/chat/completions';
-  }
-
-  /**
-   * Get API key from environment variable or localStorage
-   * @returns {string} API key
-   */
-  getApiKey() {
-    // First try environment variable
-    let apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-    
-    // If not set or is placeholder, try localStorage
-    if (!apiKey || apiKey === 'your_openai_api_key_here') {
-      apiKey = localStorage.getItem('openai_api_key');
+    constructor() {
+      this.apiKey = this.getApiKey();
+      this.baseURL = 'https://api.openai.com/v1/chat/completions';
+      this.defaultModel = 'gpt-4o-mini';
+      this._requestQueue = Promise.resolve();
+    }
+  
+    getApiKey() {
+      let apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+      if (!apiKey || apiKey === 'your_openai_api_key_here') {
+        apiKey = localStorage.getItem('openai_api_key');
+      }
+      return apiKey;
+    }
+  
+    updateApiKey(apiKey) {
+      this.apiKey = apiKey;
+      console.log('API key updated:', !!apiKey);
+    }
+  
+    isConfigured() {
+      const apiKey = this.getApiKey();
+      return apiKey && apiKey.trim() !== '' && apiKey !== 'your_openai_api_key_here';
+    }
+  
+    async analyzeContract(contractText) {
+      try {
+        console.log('Starting AI analysis...');
+        console.log('API Key configured:', this.isConfigured());
+        
+        const prompt = this.createAnalysisPrompt(contractText);
+        
+        try {
+          const response = await this.enqueue(() => this.callAIWithRetry(prompt));
+          return this.parseAIResponse(response, prompt);
+        } catch (error) {
+          // Surface rate limit errors directly so the UI can show an error message
+          if (error.message.includes('Rate limit exceeded') || 
+              error.message.includes('429') ||
+              error.message.includes('Too Many Requests')) {
+            console.warn('Rate limits persist after all retries');
+            throw new Error('OpenAI rate limit reached. Please wait and try again.');
+          }
+          throw error;
+        }
+      } catch (error) {
+        console.error('AI analysis failed:', error);
+        throw new Error('AI analysis failed: ' + error.message);
+      }
     }
     
-    return apiKey;
-  }
-
-  /**
-   * Update API key (for when user sets it via UI)
-   * @param {string} apiKey - New API key
-   */
-  updateApiKey(apiKey) {
-    this.apiKey = apiKey;
-    console.log('API key updated:', !!apiKey);
-  }
-
-  /**
-   * Check if API key is configured
-   * @returns {boolean} True if API key is available
-   */
-  isConfigured() {
-    const apiKey = this.getApiKey();
-    return apiKey && apiKey !== 'your_openai_api_key_here' && apiKey.trim() !== '';
-  }
-
-  /**
-   * Analyze contract text using AI to detect harmful clauses
-   * @param {string} contractText - The contract text to analyze
-   * @returns {Promise<Object>} Structured analysis results
-   */
-  async analyzeContract(contractText) {
-    try {
-      console.log('Starting AI analysis...');
-      console.log('API Key configured:', this.isConfigured());
-      
-      const prompt = this.createAnalysisPrompt(contractText);
-      const response = await this.callAI(prompt);
-      return this.parseAIResponse(response);
-    } catch (error) {
-      console.error('AI analysis failed:', error);
-      throw new Error('AI analysis failed: ' + error.message);
+    enqueue(taskFn) {
+      const run = this._requestQueue.then(async () => {
+        return await taskFn();
+      });
+      this._requestQueue = run.catch(() => {});
+      return run;
     }
-  }
+  
+    createAnalysisPrompt(contractText) {
+      return `You are a legal language analyst. Analyze the provided Terms text and detect clauses that could be harmful, misleading, or expensive for the user.
 
-  /**
-   * Create the comprehensive analysis prompt for the AI
-   * @param {string} contractText - The contract text to analyze
-   * @returns {string} Formatted prompt
-   */
-  createAnalysisPrompt(contractText) {
-    return `You are a **legal language analyst** specializing in detecting hidden risks in **Terms of Service (ToS)** and **consumer contracts**.  
-Your task is to analyze the provided text and **detect clauses that could be harmful, misleading, or expensive for the user**.
+Categories to detect (non-exhaustive): Auto-Renewals; Data Privacy / Data Selling; Cancellation Fees or Penalties; Unilateral Changes; Arbitration / No Class Action; Limitation of Liability; Jurisdiction & Governing Law.
 
-## Clauses to Detect
+Rules:
+- Return ONLY valid JSON. No prose before or after.
+- Include up to 10 clauses if present (not just one).
+- For each clause, the field "snippet" MUST be a verbatim substring copied from the provided contract text. Prefer a single sentence or the smallest span (<= 240 chars) that evidences the clause.
+- Keep summaries concise (<= 2 sentences). Risk: Low/Medium/High.
 
-1. **Auto-Renewals**
-   - Subscriptions, memberships, or services that renew automatically.
-   - User must cancel before a deadline to avoid charges.
-   - Cancellation is difficult or allowed only in a narrow window.
-   - Renewals happen without explicit re-consent.
-
-2. **Data Privacy / Data Selling**
-   - Company may share, sell, or transfer user data to third parties.
-   - Data may be used for advertising, profiling, or undisclosed purposes.
-   - Data may not be deleted even after account closure.
-
-3. **Cancellation Fees or Penalties**
-   - Fees for ending a service early.
-   - Charges incurred during cancellation.
-   - Forfeiture of unused credits or prepaid fees.
-
-4. **Unilateral Changes**
-   - Company reserves the right to change terms, pricing, or policies at any time without user approval.
-
-5. **Arbitration / No Class Action**
-   - Users are forced into arbitration instead of court.
-   - Users are prohibited from joining class-action lawsuits.
-
-6. **Limitation of Liability**
-   - Company disclaims responsibility for damages, losses, or service failures, even if caused by negligence.
-
-7. **Jurisdiction & Governing Law**
-   - Users must resolve disputes in a distant or inconvenient legal jurisdiction.
-
-## Output Guidelines
-
-For each detected clause:
-- 🚨 **Category & Detection**: Clearly state the type of clause found.
-- ✅ **Plain English Summary**: 2–3 sentence explanation of what it means for the user.
-- ⚖️ **Risk Rating**: Low / Medium / High.
-- 💡 **Why It Matters**: Explain the potential harm or consequence.
-- 📜 **Contract Snippet**: Include the original text that triggered detection.
-
-If no relevant clauses are detected, respond with:
-"No risky auto-renewals, data sharing, cancellation penalties, or other traps detected in this section."
-
-Please format your response as JSON with this structure:
+JSON schema:
 {
   "clauses": [
     {
-      "category": "Auto-Renewals",
+      "category": "Auto-Renewals | Data Privacy / Data Selling | Cancellation Fees or Penalties | Unilateral Changes | Arbitration / No Class Action | Limitation of Liability | Jurisdiction & Governing Law",
       "emoji": "🚨",
-      "summary": "Brief description in plain English",
-      "risk": "Low/Medium/High",
-      "whyItMatters": "Explanation of potential harm",
-      "snippet": "Original contract text that triggered detection"
+      "summary": "Plain English summary",
+      "risk": "Low|Medium|High",
+      "whyItMatters": "Brief reason",
+      "snippet": "verbatim substring from the input"
     }
   ],
-  "overallRisk": "Low/Medium/High",
+  "overallRisk": "Low|Medium|High",
   "totalClauses": 0,
-  "summary": "Brief overall assessment"
+  "summary": "Overall assessment"
 }
 
 Contract Text to Analyze:
 ${contractText}`;
-  }
-
-  /**
-   * Call the AI API
-   * @param {string} prompt - The analysis prompt
-   * @returns {Promise<Object>} AI response
-   */
-  async callAI(prompt) {
-    // Refresh API key before making the call
-    this.apiKey = this.getApiKey();
-    
-    if (!this.isConfigured()) {
-      console.log('Using simulated response (no API key configured)');
-      return this.getSimulatedResponse(prompt);
     }
-
-    console.log('Calling OpenAI API...');
-    
-    try {
-      const response = await fetch(this.baseURL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a legal analysis expert specializing in consumer protection. Provide responses in valid JSON format only.'
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          temperature: 0.3,
-          max_tokens: 3000
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('OpenAI API error:', response.status, errorData);
-        
-        if (response.status === 401) {
-          throw new Error('Invalid API key. Please check your OpenAI API key.');
-        } else if (response.status === 429) {
-          throw new Error('Rate limit exceeded. Please try again later.');
-        } else if (response.status === 400) {
-          throw new Error('Invalid request. Please check your input.');
-        } else {
-          throw new Error(`API error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+    // Enhanced retry logic with Retry-After awareness, jitter and exponential backoff
+    async callAIWithRetry(prompt, maxRetries = 5, baseDelayMs = 1000) {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          return await this.callAI(prompt);
+        } catch (err) {
+          const isRateLimit = err.message.includes('Rate limit exceeded') || 
+                             err.message.includes('429') ||
+                             err.message.includes('Too Many Requests');
+          
+          if (isRateLimit && attempt < maxRetries) {
+            const retryAfterMs = typeof err.retryAfterMs === 'number' && err.retryAfterMs > 0
+              ? err.retryAfterMs
+              : baseDelayMs * Math.pow(2, attempt - 1);
+            const jitterMs = Math.floor(Math.random() * 250);
+            const delayMs = retryAfterMs + jitterMs;
+            console.warn(`Rate limit hit, retrying in ${delayMs}ms (attempt ${attempt}/${maxRetries})`);
+            await new Promise(r => setTimeout(r, delayMs));
+          } else {
+            // If it's not a rate limit error or we've exhausted retries, throw the error
+            throw err;
+          }
         }
       }
-
-      const data = await response.json();
-      console.log('OpenAI API response received');
-      return data.choices[0].message.content;
-    } catch (error) {
-      console.error('API call failed:', error);
-      throw error;
     }
-  }
-
-  /**
-   * Parse the AI response into structured data
-   * @param {string} aiResponse - Raw AI response
-   * @returns {Object} Structured analysis results
-   */
-  parseAIResponse(aiResponse) {
-    try {
-      console.log('Parsing AI response...');
-      // Try to parse as JSON
-      const parsed = JSON.parse(aiResponse);
-      
-      // Validate the response structure
-      if (!parsed.clauses || !Array.isArray(parsed.clauses)) {
-        console.warn('Invalid response structure, using fallback parsing');
+  
+    async callAI(prompt) {
+      this.apiKey = this.getApiKey();
+  
+      if (!this.isConfigured()) {
+        throw new Error('OpenAI API key not configured');
+      }
+  
+      const tryModel = async (modelName) => {
+        console.log(`Calling OpenAI API with model: ${modelName}`);
+        const response = await fetch(this.baseURL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.apiKey}`
+          },
+          body: JSON.stringify({
+            model: modelName,
+            messages: [
+              { role: 'system', content: 'You are a legal analysis expert specializing in consumer protection. Provide responses in valid JSON format only.' },
+              { role: 'user', content: prompt }
+            ],
+            temperature: 0.3,
+            max_tokens: 1000
+          })
+        });
+  
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          const errorMessage = errorData.error?.message || 'Unknown error';
+          
+          if (response.status === 404 || response.status === 403) {
+            throw { type: 'MODEL_NOT_FOUND', originalError: errorData };
+          } else if (response.status === 401) {
+            throw new Error('Invalid API key');
+          } else if (response.status === 429) {
+            // Enhanced rate limit error with more details
+            const retryAfter = response.headers.get('Retry-After');
+            const retryInfo = retryAfter ? ` (retry after ${retryAfter}s)` : '';
+            const e = new Error(`Rate limit exceeded${retryInfo}`);
+            const retryAfterSeconds = retryAfter ? Number(retryAfter) : undefined;
+            if (!Number.isNaN(retryAfterSeconds) && retryAfterSeconds > 0) {
+              e.retryAfterMs = Math.floor(retryAfterSeconds * 1000);
+            }
+            throw e;
+          } else if (response.status === 400) {
+            throw new Error(`Invalid request: ${errorMessage}`);
+          } else {
+            throw new Error(`API error: ${response.status} - ${errorMessage}`);
+          }
+        }
+  
+        const data = await response.json();
+        return data.choices[0].message.content;
+      };
+  
+      try {
+        // Try the default model first
+        return await tryModel(this.defaultModel);
+      } catch (err) {
+        if (err.type === 'MODEL_NOT_FOUND') {
+          throw new Error(`${this.defaultModel} is not available for this API key`);
+        } else {
+          throw err;
+        }
+      }
+    }
+  
+    parseAIResponse(aiResponse, originalPrompt) {
+      try {
+        const jsonString = this.extractJsonString(aiResponse);
+        const parsed = JSON.parse(jsonString);
+        if (!parsed.clauses || !Array.isArray(parsed.clauses)) {
+          return this.parseTextResponse(aiResponse);
+        }
+        // Attempt to ensure snippet presence by deriving from contract text when possible
+        let contractText = '';
+        if (typeof originalPrompt === 'string') {
+          const marker = 'Contract Text to Analyze:\n';
+          const idx = originalPrompt.indexOf(marker);
+          if (idx !== -1) {
+            contractText = originalPrompt.substring(idx + marker.length);
+          }
+        }
+        if (contractText) {
+          parsed.clauses = parsed.clauses.map((c) => {
+            if (!c || typeof c !== 'object') return c;
+            const hasSnippet = typeof c.snippet === 'string' && c.snippet.trim().length > 0 && contractText.includes(c.snippet.trim());
+            if (!hasSnippet) {
+              const inferred = this.inferSnippet(contractText, c.category);
+              if (inferred) {
+                c.snippet = inferred;
+              }
+            }
+            return c;
+          });
+        }
+        return {
+          success: true,
+          clauses: parsed.clauses || [],
+          overallRisk: parsed.overallRisk || 'Low',
+          totalClauses: parsed.totalClauses || parsed.clauses.length || 0,
+          summary: parsed.summary || 'Analysis completed',
+          rawResponse: aiResponse,
+          isRealAI: this.isConfigured()
+        };
+      } catch {
         return this.parseTextResponse(aiResponse);
       }
+    }
 
-      console.log('Successfully parsed AI response');
-      return {
+    extractJsonString(raw) {
+      if (typeof raw !== 'string') return '{}';
+      // Fast path
+      try { JSON.parse(raw); return raw; } catch {}
+      const first = raw.indexOf('{');
+      const last = raw.lastIndexOf('}');
+      if (first !== -1 && last !== -1 && last > first) {
+        const slice = raw.substring(first, last + 1);
+        try { JSON.parse(slice); return slice; } catch {}
+      }
+      return '{}';
+    }
+
+    inferSnippet(contractText, category) {
+      if (!contractText || !category) return '';
+      const lcText = contractText;
+      const sentences = lcText.split(/(?<=[.!?])\s+/);
+      const keyMap = {
+        'Auto-Renewals': ['auto-renew', 'automatic renewal', 'renews automatically', 'renewal date', 'cancel before'],
+        'Data Privacy / Data Selling': ['share your data', 'sell your data', 'third parties', 'marketing partners', 'affiliates', 'personal data'],
+        'Cancellation Fees or Penalties': ['cancellation fee', 'early termination fee', 'penalty', 'forfeit', 'non-refundable'],
+        'Unilateral Changes': ['we reserve the right to modify', 'change these terms', 'at any time without', 'amend', 'modify at our discretion'],
+        'Arbitration / No Class Action': ['arbitration', 'class action', 'jury trial waiver', 'binding arbitration', 'dispute resolution'],
+        'Limitation of Liability': ['limitation of liability', 'not liable', 'no liability', 'indirect', 'consequential', 'punitive damages'],
+        'Jurisdiction & Governing Law': ['governing law', 'jurisdiction', 'venue', 'courts of', 'state of']
+      };
+      const keys = keyMap[category] || [];
+      for (const s of sentences) {
+        for (const k of keys) {
+          if (s.toLowerCase().includes(k)) {
+            return s.length <= 240 ? s : s.slice(0, 237) + '...';
+          }
+        }
+      }
+      // Fallback: return first 200 chars
+      return contractText.slice(0, 200);
+    }
+  
+    parseTextResponse(textResponse) {
+      const results = {
         success: true,
-        clauses: parsed.clauses || [],
-        overallRisk: parsed.overallRisk || 'Low',
-        totalClauses: parsed.totalClauses || parsed.clauses.length || 0,
-        summary: parsed.summary || 'Analysis completed',
-        rawResponse: aiResponse,
+        clauses: [],
+        overallRisk: 'Low',
+        totalClauses: 0,
+        summary: 'Analysis completed (text parsing)',
+        rawResponse: textResponse,
         isRealAI: this.isConfigured()
       };
-    } catch (error) {
-      console.warn('JSON parsing failed, using text parsing:', error);
-      // If JSON parsing fails, try to extract information from text
-      return this.parseTextResponse(aiResponse);
+  
+      return results;
     }
+  
+    // Simulated response removed by user request; callers should handle thrown errors instead
   }
-
-  /**
-   * Parse text response when JSON parsing fails
-   * @param {string} textResponse - Text response from AI
-   * @returns {Object} Structured results
-   */
-  parseTextResponse(textResponse) {
-    console.log('Using text parsing fallback');
-    // Fallback parsing logic for text responses
-    const results = {
-      success: true,
-      clauses: [],
-      overallRisk: 'Low',
-      totalClauses: 0,
-      summary: 'Analysis completed (text parsing)',
-      rawResponse: textResponse,
-      isRealAI: this.isConfigured()
-    };
-
-    // Basic text parsing logic (can be enhanced)
-    if (textResponse.toLowerCase().includes('auto-renewal') || 
-        textResponse.toLowerCase().includes('automatic renewal')) {
-      results.clauses.push({
-        category: 'Auto-Renewals',
-        emoji: '🚨',
-        summary: 'Auto-renewal clause detected',
-        risk: 'Medium',
-        whyItMatters: 'Service may renew automatically without explicit consent',
-        snippet: 'Auto-renewal related text found'
-      });
-    }
-
-    return results;
-  }
-
-  /**
-   * Get simulated response for development/testing
-   * @param {string} prompt - The analysis prompt
-   * @returns {Promise<string>} Simulated AI response
-   */
-  async getSimulatedResponse(prompt) {
-    console.log('Generating simulated response...');
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // Return simulated analysis results with the new structure
-    return JSON.stringify({
-      clauses: [
-        {
-          category: "Auto-Renewals",
-          emoji: "🚨",
-          summary: "This contract auto-renews every year unless the user cancels at least 30 days in advance.",
-          risk: "Medium",
-          whyItMatters: "Users who forget to cancel in time may be charged for another year without warning.",
-          snippet: "Your subscription will automatically renew unless canceled 30 days before the renewal date..."
-        },
-        {
-          category: "Data Privacy / Data Selling",
-          emoji: "🚨",
-          summary: "The company reserves the right to share user data with third-party marketing partners.",
-          risk: "High",
-          whyItMatters: "Your personal data may be used or sold for advertising without further notice.",
-          snippet: "We may share your information with our marketing partners and affiliates for commercial purposes..."
-        },
-        {
-          category: "Unilateral Changes",
-          emoji: "🚨",
-          summary: "The company can change terms and pricing at any time without user approval.",
-          risk: "Medium",
-          whyItMatters: "You may be subject to new terms or higher prices without warning.",
-          snippet: "We reserve the right to modify these terms at any time with or without notice..."
-        }
-      ],
-      overallRisk: "Medium",
-      totalClauses: 3,
-      summary: "Found 3 potentially harmful clauses including auto-renewals, data sharing, and unilateral changes."
-    });
-  }
-}

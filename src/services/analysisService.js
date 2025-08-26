@@ -37,7 +37,6 @@ export class AnalysisService {
    */
   static async analyzeContractFromURL(url) {
     try {
-      // TODO: Implement web scraping to extract contract text from URL
       const contractText = await AnalysisService.scrapeContractFromURL(url);
       return await AnalysisService.analyzeContract(contractText);
     } catch (error) {
@@ -51,9 +50,35 @@ export class AnalysisService {
    * @returns {Promise<string>} Extracted contract text
    */
   static async scrapeContractFromURL(url) {
-    // TODO: Implement web scraping
-    // For now, return a placeholder
-    return `Contract text extracted from ${url}. This is a placeholder for web scraping functionality.`;
+    if (!url || typeof url !== 'string') {
+      throw new Error('Invalid URL');
+    }
+    // Normalize URL and route via a CORS-friendly content reader (read-only)
+    const normalized = url.startsWith('http') ? url : `https://${url}`;
+    const encoded = encodeURI(normalized);
+    // Jina reader returns cleaned text/markdown for most public pages
+    const readerUrl = `https://r.jina.ai/${encoded}`;
+    const resp = await fetch(readerUrl, { method: 'GET' });
+    if (!resp.ok) {
+      throw new Error(`Failed to fetch page content (${resp.status})`);
+    }
+    const pageText = await resp.text();
+    const cleaned = AnalysisService.cleanExtractedText(pageText);
+    if (!cleaned || cleaned.trim().length < 80) {
+      throw new Error('Could not extract meaningful text from the URL');
+    }
+    // Limit to a reasonable size for token budget
+    return cleaned.slice(0, 25000);
+  }
+
+  static cleanExtractedText(text) {
+    if (!text) return '';
+    return text
+      .replace(/\r/g, '')
+      .replace(/\t/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
   }
 
   /**
@@ -112,15 +137,31 @@ export class AnalysisService {
   static getRiskColor(risk) {
     switch (risk.toLowerCase()) {
       case 'high':
-        return 'text-red-600 bg-red-50 border-red-200';
+        return 'text-red-800 bg-red-100 border-red-200';
       case 'medium':
-        return 'text-yellow-600 bg-yellow-50 border-yellow-200';
+        return 'text-yellow-800 bg-yellow-100 border-yellow-200';
       case 'low':
-        return 'text-green-600 bg-green-50 border-green-200';
+        return 'text-green-800 bg-green-100 border-green-200';
       case 'very low':
-        return 'text-blue-600 bg-blue-50 border-blue-200';
+        return 'text-blue-800 bg-blue-100 border-blue-200';
       default:
         return 'text-gray-600 bg-gray-50 border-gray-200';
+    }
+  }
+
+  // Risk chip classes for small colored badges
+  static getRiskChipClasses(risk) {
+    switch (risk.toLowerCase()) {
+      case 'high':
+        return 'bg-red-100 text-red-800';
+      case 'medium':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'low':
+        return 'bg-green-100 text-green-800';
+      case 'very low':
+        return 'bg-blue-100 text-blue-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
     }
   }
 

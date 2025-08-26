@@ -169,57 +169,39 @@ function App() {
         <div className="bg-white p-6 rounded-lg shadow-md">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-xl font-semibold text-gray-800">Analysis Results</h3>
-            {analysis.isRealAI ? (
-              <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">
-                🤖 Real AI
-              </span>
-            ) : (
-              <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
-                🎭 Simulated
-              </span>
-            )}
           </div>
           
-          {/* Overall Summary */}
-          <div className={`mb-6 p-4 rounded-lg border ${AnalysisService.getRiskColor(overallRisk)}`}>
-            <div className="flex items-center gap-2 mb-2">
+          {/* Overall Summary - simplified per spec */}
+          <div className="mb-6 p-4 rounded-lg bg-gray-50">
+            <div className="flex items-center gap-2">
               <span className="text-2xl">{AnalysisService.getRiskIcon(overallRisk)}</span>
-              <h4 className="font-semibold">Overall Risk: {overallRisk}</h4>
+              <h4 className="font-semibold text-black">Overall Risk: {overallRisk}</h4>
             </div>
-            <p className="text-sm">
-              Found {summary.totalClauses} clause{summary.totalClauses !== 1 ? 's' : ''} 
-              ({summary.highRiskClauses} high risk, {summary.mediumRiskClauses} medium risk, {summary.lowRiskClauses} low risk)
-            </p>
           </div>
 
           {/* Individual Clauses */}
           {clauses.length > 0 ? (
             <div className="space-y-4">
-              <h4 className="font-semibold text-gray-700">Detected Clauses:</h4>
+              <h4 className="font-semibold text-gray-700">{summary.totalClauses} clause{summary.totalClauses !== 1 ? 's' : ''} detected.</h4>
               {clauses.map((clause, index) => (
-                <div key={index} className={`p-4 rounded-lg border ${AnalysisService.getRiskColor(clause.risk)}`}>
+                <div key={index} className="p-4 rounded-lg border border-gray-200 bg-gray-50">
                   <div className="flex items-center gap-2 mb-2">
                     <span className="text-xl">{clause.emoji}</span>
                     <span className="text-lg">{AnalysisService.getCategoryIcon(clause.category)}</span>
                     <h5 className="font-semibold">{clause.category}</h5>
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${AnalysisService.getRiskColor(clause.risk)}`}>
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${AnalysisService.getRiskChipClasses(clause.risk)}`}>
                       {clause.risk} Risk
                     </span>
                   </div>
-                  
-                  <div className="space-y-2 text-sm">
+                  <div className="space-y-2 text-sm text-gray-800">
                     <div>
-                      <strong>Summary:</strong> {clause.summary}
+                      {clause.summary} {clause.whyItMatters}
                     </div>
-                    <div>
-                      <strong>Why it matters:</strong> {clause.whyItMatters}
-                    </div>
-                    <div>
-                      <strong>Contract snippet:</strong>
-                      <blockquote className="mt-1 p-2 bg-gray-50 rounded italic">
+                    {clause.snippet && (
+                      <blockquote className="mt-1 p-3 bg-white rounded italic border border-gray-200">
                         "{clause.snippet}"
                       </blockquote>
-                    </div>
+                    )}
                   </div>
                 </div>
               ))}

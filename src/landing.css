@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Minimal base styles to ensure sane defaults without Tailwind v4-specific utilities */
+@layer base {
+  :root {
+    --radius: 10px;
+  }
+  body {
+    @apply bg-white text-gray-900;
+  }
+}

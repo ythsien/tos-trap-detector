@@ -3,6 +3,7 @@ export default {
     content: [
       "./index.html",
       "./src/**/*.{js,ts,jsx,tsx}",
+      "./ToSCheck Landing Page/**/*.{js,ts,jsx,tsx,html,css}"
     ],
     theme: {
       extend: {},
